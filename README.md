@@ -1,205 +1,94 @@
-# Log Analytics on Google Cloud
+# Google Cloud Audit Logs
 
-This repository demonstrates how to use Cloud Logging on Google Cloud Platform (GCP) to gain insights into applications running on Google Kubernetes Engine (GKE).
+This repository contains documentation and code for a hands-on project with Google Cloud Audit Logs, demonstrating how to enable, generate, and view audit logs in Google Cloud Platform.
 
-## Overview
+## Project Overview
 
-Cloud Logging is a fully managed service that allows you to store, search, analyze, monitor, and alert on logging data and events from Google Cloud. This project shows how to effectively use log analytics to understand application behavior and performance.
+The project explores Google Cloud Audit Logs which maintain multiple audit logs for projects, folders, and organizations to track who did what, when, and where within a Google Cloud environment.
 
-## What You'll Learn
+## Objectives
 
-- How to use Cloud Logging effectively to gain insights about applications running on Google Kubernetes Engine (GKE)
-- How to build and run effective queries using log analytics
-- How to manage log buckets and configure log sinks
-- How to analyze various aspects of application performance using SQL queries
+In this project, I:
+- Enabled data access logs on Cloud Storage
+- Generated admin and data access activity
+- Viewed and analyzed different types of audit logs
 
-## Demo Application
+## Video
 
-This project uses the [Online Boutique](https://github.com/GoogleCloudPlatform/microservices-demo) microservices demo application deployed to a GKE cluster. This demo app consists of multiple microservices and dependencies.
+https://youtu.be/jit_lWJuHlM
 
-![Online Boutique Architecture](images/microservices-diagram.png)
 
-## Prerequisites
+## Implementation Steps
 
-- Google Cloud Platform account
-- GKE cluster provisioned in europe-west1-b zone
-- Basic familiarity with Kubernetes and SQL
+### 1. Enabling Data Access Logs on Cloud Storage
 
-## Setup Instructions
+Data access logs on Cloud Storage were enabled to track operations that read or write user-provided data, as well as metadata and configuration information:
 
-### 1. Set up the GKE Cluster
+1. Navigated to **IAM & Admin > Audit Logs** in the Google Cloud console
+2. Located and selected Google Cloud Storage
+3. Enabled the following log types:
+   - Admin Read: Records operations that read metadata or configuration information
+   - Data Read: Records operations that read user-provided data
+   - Data Write: Records operations that write user-provided data
 
+### 2. Generating Admin and Data Access Activity
+
+Created various resources to generate audit logs:
+
+1. Created a Cloud Storage bucket with the same name as the project:
 ```bash
-# Set the compute zone
-gcloud config set compute/zone europe-west1-b
-
-# Verify cluster status
-gcloud container clusters list
-
-# Get cluster credentials
-gcloud container clusters get-credentials day2-ops --region europe-west1
-
-# Verify nodes are ready
-kubectl get nodes
+gcloud storage buckets create gs://$DEVSHELL_PROJECT_ID
 ```
 
-### 2. Deploy the Application
-
+2. Created and uploaded a simple text file to the bucket:
 ```bash
-# Clone the repository
-git clone https://github.com/GoogleCloudPlatform/microservices-demo.git
-
-# Navigate to the directory
-cd microservices-demo
-
-# Deploy the application
-kubectl apply -f release/kubernetes-manifests.yaml
-
-# Verify pods are running
-kubectl get pods
-
-# Get the external IP of the application
-export EXTERNAL_IP=$(kubectl get service frontend-external -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
-echo $EXTERNAL_IP
-
-# Confirm the app is running
-curl -o /dev/null -s -w "%{http_code}\n" http://${EXTERNAL_IP}
+echo "Hello World!" > sample.txt
+gcloud storage cp sample.txt gs://$DEVSHELL_PROJECT_ID
 ```
 
-### 3. Manage Log Buckets
+3. Created a new auto-mode network and virtual machine:
+```bash
+gcloud compute networks create mynetwork --subnet-mode=auto
 
-#### Option 1: Upgrade an Existing Bucket
-
-1. Navigate to **Observability > Logging > Logs storage**
-2. Click **UPGRADE** for an existing bucket (e.g., the Default bucket)
-3. Confirm the upgrade
-4. Wait for the upgrade to complete
-5. Open the `_AllLogs` view
-
-#### Option 2: Create a New Log Bucket
-
-1. Navigate to **Logging > Logs storage**
-2. Click **CREATE LOG BUCKET**
-3. Provide a name (e.g., `day2ops-log`)
-4. Check both:
-   - Upgrade to use Log Analytics
-   - Create a new BigQuery dataset that links to this bucket
-5. Add a dataset name (e.g., `day2ops_log`)
-6. Click **Create bucket**
-
-### 4. Write to the New Log Bucket
-
-1. Navigate to **Logging > Logs Explorer**
-2. Enable **Show query** and run:
-   ```
-   resource.type="k8s_container"
-   ```
-3. Click **Actions > Create sink**
-4. Provide a name (e.g., `day2ops-sink`)
-5. Select **Logging bucket** as the sink service
-6. Select your new log bucket
-7. The resource type query should be automatically included in the filter
-8. Create the sink
-
-### 5. Read from the New Log Bucket
-
-1. In Logs Explorer, select your new log bucket from **Project logs > Log view**
-2. Click **APPLY**
-3. Observe that only Kubernetes Container logs are now shown
-
-## Log Analysis Examples
-
-Navigate to the **Log Analytics** page to run SQL queries against your logs.
-
-### Find the Most Recent Errors
-
-```sql
-SELECT
- TIMESTAMP,
- JSON_VALUE(resource.labels.container_name) AS container,
- json_payload
-FROM
- `PROJECT_ID.global.day2ops-log._AllLogs`
-WHERE
- severity="ERROR"
- AND json_payload IS NOT NULL
-ORDER BY
- 1 DESC
-LIMIT
- 50
+gcloud compute instances create default-us-vm \
+  --zone=us-central1-a --network=mynetwork \
+  --machine-type=e2-medium
 ```
 
-### Find Min, Max, and Average Latency
-
-```sql
-SELECT
-hour,
-MIN(took_ms) AS min,
-MAX(took_ms) AS max,
-AVG(took_ms) AS avg
-FROM (
-SELECT
-  FORMAT_TIMESTAMP("%H", timestamp) AS hour,
-  CAST( JSON_VALUE(json_payload,
-      '$."http.resp.took_ms"') AS INT64 ) AS took_ms
-FROM
-  `PROJECT_ID.global.day2ops-log._AllLogs`
-WHERE
-  timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
-  AND json_payload IS NOT NULL
-  AND SEARCH(labels,
-    "frontend")
-  AND JSON_VALUE(json_payload.message) = "request complete"
-ORDER BY
-  took_ms DESC,
-  timestamp ASC )
-GROUP BY
-1
-ORDER BY
-1
+4. Deleted the storage bucket to generate deletion logs:
+```bash
+gcloud storage rm -r gs://$DEVSHELL_PROJECT_ID
 ```
 
-### Count Product Page Visits
+### 3. Viewing Audit Logs
 
-```sql
-SELECT
-count(*)
-FROM
-`PROJECT_ID.global.day2ops-log._AllLogs`
-WHERE
-text_payload like "GET %/product/L9ECAV7KIM %"
-AND
-timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
+#### Using Google Cloud Console
+
+1. Navigated to **Observability > Logging > Logs Explorer**
+2. Viewed Admin Activity logs:
+   - Filtered to Cloud Audit logs
+   - Further filtered to GCS Bucket entries
+   - Examined log entries for the bucket deletion event
+   - Examined authentication information showing which user performed actions
+
+#### Using Cloud SDK
+
+Viewed data access logs via command line:
+```bash
+gcloud logging read \
+"logName=projects/$DEVSHELL_PROJECT_ID/logs/cloudaudit.googleapis.com%2Fdata_access"
 ```
 
-### Count Checkout Sessions
+## Key Learnings
 
-```sql
-SELECT
- JSON_VALUE(json_payload.session),
- COUNT(*)
-FROM
- `PROJECT_ID.global.day2ops-log._AllLogs`
-WHERE
- JSON_VALUE(json_payload['http.req.method']) = "POST"
- AND JSON_VALUE(json_payload['http.req.path']) = "/cart/checkout"
- AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
-GROUP BY
- JSON_VALUE(json_payload.session)
-```
+- Google Cloud Audit Logs provide transparency into who performed what actions in your cloud resources
+- Admin Activity logs are always enabled and record configuration changes
+- Data Access logs must be explicitly enabled and can track read/write operations on data
+- Logs can be viewed through both the Google Cloud Console and CLI tools
+- Log entries contain detailed information including timestamps, users, resources, and specific operations
 
-## Screenshots
+## Resources
 
-- [GKE Cluster Setup](images/gke-cluster.png)
-- [Application Deployment](images/application-deployment.png)
-- [Log Analytics Interface](images/log-analytics.png)
-
-## Additional Resources
-
+- [Google Cloud Audit Logs Documentation](https://cloud.google.com/logging/docs/audit)
 - [Cloud Logging Documentation](https://cloud.google.com/logging/docs)
-- [GKE Documentation](https://cloud.google.com/kubernetes-engine/docs)
-- [Microservices Demo Repository](https://github.com/GoogleCloudPlatform/microservices-demo)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- [gcloud logging command reference](https://cloud.google.com/sdk/gcloud/reference/logging)
