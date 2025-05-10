@@ -1,0 +1,35 @@
+flowchart TD
+    User[User Activity] -->|Generates| Activity
+    Activity -->|Logged as| AdminAct[Admin Activity Logs]
+    Activity -->|Logged as| DataAcc[Data Access Logs]
+    
+    subgraph "Log Types"
+        direction TB
+        AdminAct[Admin Activity Logs\n Always Enabled] -.->|View| LogExp
+        DataAcc[Data Access Logs\n Must be Enabled] -.->|View| LogExp
+        SysEvent[System Event Logs] -.->|View| LogExp
+        PolicyDenied[Policy Denied Logs] -.->|View| LogExp
+    end
+    
+    subgraph "Sample Operations"
+        direction TB
+        CreateBucket[Create Storage Bucket]
+        UploadFile[Upload File]
+        CreateVM[Create VM Instance]
+        DeleteBucket[Delete Storage Bucket]
+    end
+    
+    CreateBucket -->|Admin Activity| AdminAct
+    UploadFile -->|Data Access| DataAcc
+    CreateVM -->|Admin Activity| AdminAct
+    DeleteBucket -->|Admin Activity| AdminAct
+    
+    subgraph "Viewing Methods" 
+        LogExp[Logs Explorer\nGoogle Cloud Console]
+        CLI[Command Line\ngcloud logging read]
+    end
+    
+    LogExp --> Analysis
+    CLI --> Analysis
+    
+    Analysis[Log Analysis\nAudit & Compliance]
